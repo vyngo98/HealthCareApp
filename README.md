@@ -3,7 +3,8 @@
 An AI-powered multi-agent system for analyzing wearable sleep studies using physiological signals, machine learning models, Retrieval-Augmented Generation (RAG), and Large Language Models (LLMs).
 
 The system automatically processes wearable sensor recordings, predicts sleep stages, computes sleep metrics, evaluates signal quality, retrieves sleep science knowledge, and generates human-readable sleep insights through a coordinated team of AI agents.
-![Demo](videos/Screenshot from 2026-06-17 15-35-55.png)
+
+![Demo](videos/Screenshot-2026-06-17-15-35-55.png)
 ---
 
 ## Motivation
@@ -187,7 +188,7 @@ The dashboard allows users to inspect:
 
 ---
 ## Demo
-[Watch the demo video here](videos/Screencast from 2026-06-17 15-32-45.webm)
+[Watch the demo video here](videos/Screencast-2026-06-17-15-32-45.webm)
 
 ---
 
