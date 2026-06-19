@@ -4,7 +4,7 @@ An AI-powered multi-agent system for analyzing wearable sleep studies using phys
 
 The system automatically processes wearable sensor recordings, predicts sleep stages, computes sleep metrics, evaluates signal quality, retrieves sleep science knowledge, and generates human-readable sleep insights through a coordinated team of AI agents.
 
-![Demo](videos/Screenshot-2026-06-17-15-35-55.png)
+![Demo](videos/Screenshot_from_2026-06-18_17-36-36.png)
 ---
 
 ## Motivation
@@ -150,7 +150,10 @@ Final Response
 Example:
 
 User:
-"Interpret the sleep quality of Study A"
+"Interpret the sleep quality of Study A. Is this considered normal? Scientific evidence is needed"
+
+Demo:
+[Watch the demo video here](videos/Screencast_from_2026-06-18_17-36-45.webm)
 
 Workflow:
 
@@ -160,9 +163,11 @@ Interpretation Agent
 ↓
 Load Metrics Tool
 ↓
-Knowledge Retrieval Tool
+Knowledge Agent
 ↓
-Sleep Report Generation
+Retrieval Tool
+↓
+Final Response
 
 ---
 
@@ -183,12 +188,7 @@ The dashboard allows users to inspect:
 
 * Agent reasoning flow
 * Tool calls
-* Intermediate outputs
 * Final interpretations
-
----
-## Demo
-[Watch the demo video here](videos/Screencast-2026-06-17-15-32-45.webm)
 
 ---
 
