@@ -153,7 +153,7 @@ User:
 "Interpret the sleep quality of Study A. Is this considered normal? Scientific evidence is needed"
 
 Demo:
-[Watch the demo video here](videos/Screencast_from_2026-06-18_17-36-45.webm)
+![Watch the demo video here](videos/Screencast_from_2026-06-18_17-36-45.gif)
 
 Workflow:
 
