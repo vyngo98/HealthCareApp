@@ -1,15 +1,19 @@
 from llama_index.core.tools import FunctionTool
 # from llama_index.llms.huggingface_api import HuggingFaceInferenceAPI
 from llama_index.llms.ollama import Ollama
-from llama_index.core.agent.workflow import AgentWorkflow, ReActAgent
+from llama_index.core.agent.workflow import AgentWorkflow, ReActAgent, FunctionAgent
 from llama_index.core import SimpleDirectoryReader
 from llama_index.core.tools import QueryEngineTool
 import chromadb
 from llama_index.vector_stores.chroma import ChromaVectorStore
 from llama_index.embeddings.ollama import OllamaEmbedding
 from llama_index.core import VectorStoreIndex
-import asyncio
+# import asyncio
 from tools import *
+from qdrant_client import QdrantClient
+from qdrant_client.http.models import Distance, VectorParams, PointStruct
+
+# qdrant_client = QdrantClient(url="http://localhost:6333")
 
 # Initialize the tool
 load_study_tool = FunctionTool.from_defaults(load_study)
@@ -24,12 +28,8 @@ load_metrics_tool = FunctionTool.from_defaults(
     load_metrics
 )
 
-documents = SimpleDirectoryReader(
-    os.path.join(AGENTS_FOLDER, "knowledge")
-).load_data()
-
-db = chromadb.PersistentClient(path="./alfred_chroma_db")
-chroma_collection = db.get_or_create_collection("alfred")
+db = chromadb.PersistentClient(path="./knowledge_chroma_db")
+chroma_collection = db.get_collection("knowledge")
 vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
 
 embed_model = OllamaEmbedding(
@@ -45,11 +45,11 @@ llm = Ollama(
     request_timeout=600
 )
 
-query_engine = index.as_query_engine(llm=llm, similarity_top_k=1)
+query_engine = index.as_query_engine(llm=llm, similarity_top_k=3)
 
 retrieval_tool = QueryEngineTool.from_defaults(
     query_engine=query_engine,
-    name="sleep_knowledge_base",
+    name="retrieval_tool",
     description="Provides sleep science references."
 )
 
@@ -71,7 +71,7 @@ data_quality_agent = ReActAgent(
 
     - accelerometer_data_availability_percent:
       Percentage of recording duration with valid accelerometer data.
-      
+
     - ppg_data_availability_percent:
       Percentage of recording duration with valid accelerometer data.
 
@@ -86,13 +86,13 @@ data_quality_agent = ReActAgent(
     - Do not perform sleep interpretation.
     - Do not diagnose medical conditions.
     - Focus only on data quality and recording quality.
-    
+
     You cannot:
 
     - Interpret sleep quality because you only have data quality
     - Compute sleep metrics
     - Diagnose diseases
-    
+
     If sleep metrics are requested,
     handoff to the appropriate agent.
     """,
@@ -110,65 +110,89 @@ sleep_stage_agent = ReActAgent(
     streaming=False
 )
 
-
-
 sleep_metrics_agent = ReActAgent(
     name="sleep_metrics_agent",
     description="Is able to compute sleep metrics from hypnogram file of study",
-    system_prompt="You are a helpful assistant that can use a tool to compute sleep metrics from hypnogram file of study. Your task is to return all the computed sleep metrics",
+    system_prompt="You are a helpful assistant that can use a tool to compute sleep metrics from hypnogram file of study. Your task is to return all the computed sleep metrics. After computing metrics: "
+                  "DO NOT answer the user. DO NOT generate interpretations. Immediately handoff to interpretation_agent. "
+                  "Your job ends after metrics generation.",
     tools=[compute_sleep_metrics_tool],
     llm=llm,
-    streaming=False
+    streaming=False,
+    can_handoff_to=[
+        "sleep_stage_agent",
+        "interpretation_agent"
+    ],
 )
 
 interpretation_agent = ReActAgent(
     name="interpretation_agent",
-    description="Interpret sleep metrics or sleep quality of study and generate sleep insights",
+
+    description="""
+    Interprets sleep metrics and generates sleep reports.
+    """,
+
     llm=llm,
-    tools=[load_metrics_tool, retrieval_tool],
-    # tools=[load_metrics_tool],
-    max_iterations=5,
+
+    tools=[
+        load_metrics_tool
+    ],
+
+    can_handoff_to=[
+        "sleep_metrics_agent",
+        "knowledge_agent"
+    ],
+
+    # max_iterations=8,
+
     system_prompt="""
-You are a sleep interpretation expert.
+You are a Sleep Interpretation Expert.
 
-You receive sleep metrics generated from wearable sensors. Your job is to interpret these metrics.
+Your job is to interpret sleep studies.
 
-Your tasks:
-1. Load metrics file using load_metrics_tool
-2. Summarize sleep quality.
-3. Retrieve from knowledge base about sleep quality using retrieval_tool
-4. Explain important metrics.
-5. Highlight unusual findings.
+Workflow:
 
-Rules:
-- You must call retrieval_tool before answering final interpretation.
-- Do not diagnose diseases.
-- Do not claim medical conditions.
-- Only provide sleep insights.
-- Explain metrics in simple language.
-- Mention both strengths and weaknesses.
-- Use cautious language.
-- Mention uncertainty when appropriate.
+Step 1:
+Load metrics using load_metrics.
+if there is no metrics file yet, handoff to sleep_metrics_agent.
 
-Example:
+Step 2:
+Determine whether scientific evidence is needed.
 
-Sleep efficiency below 80% may indicate fragmented sleep.
+If evidence is needed:
+handoff to knowledge_agent.
 
-Elevated sleep latency In sleep medicine, it is a crucial metric for evaluating overall sleep quality and diagnosing sleep disorders, helping to indicate whether you are getting sufficient, restorative rest.
+Step 3:
+Use returned evidence.
 
-Low REM percentage may indicate reduced restorative sleep.
+Step 4:
+Generate the final report.
 
-IMPORTANT:
-Before interpreting any sleep metric, you MUST query by retrieval_tool to retrieve supporting sleep science evidence.
+Important:
 
-Do not answer directly from your own knowledge.
+You MUST NOT answer before loading metrics.
 
-Always retrieve relevant references first.
+You MUST use knowledge_agent whenever:
 
-After interpreting the metrics,
-and when you have enough information:
+- sleep quality is requested
+- recommendations are requested
+- explanations are requested
+- sleep science references are requested
 
-Respond ONLY in this format:
+You are responsible for:
+
+- sleep quality summary
+- sleep insights
+- recommendations
+
+You are NOT responsible for:
+
+- retrieving documents
+- querying vector database
+
+knowledge_agent handles retrieval.
+
+Output format:
 
 Final Answer:
 
@@ -183,11 +207,118 @@ Final Answer:
 ## Recommendations
 
 ...
-    
-Do not output Thought.
-Do not output Action.
-Do not output Action Input.
+"""
+)
 
+# interpretation_agent = ReActAgent(
+#     name="interpretation_agent",
+#     description="Interpret sleep metrics or sleep quality of study and generate sleep insights",
+#     llm=llm,
+#     tools=[load_metrics_tool, retrieval_tool],
+#     # tools=[interpret_sleep_report_tool],
+#     max_iterations=3,
+#     system_prompt="""
+# You are a sleep interpretation expert.
+#
+# You receive sleep metrics generated from wearable sensors. Your job is to interpret these metrics.
+#
+# Your tasks:
+# 1. Load metrics file using load_metrics_tool
+# 2. Summarize sleep quality.
+# 3. Retrieve from knowledge base about sleep quality using retrieval_tool
+# 4. Explain important metrics.
+# 5. Highlight unusual findings.
+#
+# Rules:
+# - You must call retrieval_tool before answering final interpretation.
+# - Do not diagnose diseases.
+# - Do not claim medical conditions.
+# - Only provide sleep insights.
+# - Explain metrics in simple language.
+# - Mention both strengths and weaknesses.
+# - Use cautious language.
+# - Mention uncertainty when appropriate.
+#
+# Example:
+#
+# Sleep efficiency below 80% may indicate fragmented sleep.
+#
+# Elevated sleep latency In sleep medicine, it is a crucial metric for evaluating overall sleep quality and diagnosing sleep disorders, helping to indicate whether you are getting sufficient, restorative rest.
+#
+# Low REM percentage may indicate reduced restorative sleep.
+#
+# IMPORTANT:
+# Before interpreting any sleep metric, you MUST query by retrieval_tool to retrieve supporting sleep science evidence.
+#
+# Do not answer directly from your own knowledge.
+#
+# Always retrieve relevant references first.
+#
+# After interpreting the metrics,
+# and when you have enough information:
+#
+# Respond ONLY in this format:
+#
+# Final Answer:
+#
+# ## Summary
+#
+# ...
+#
+# ## Key Findings
+#
+# ...
+#
+# ## Recommendations
+#
+# ...
+#
+# Do not output Thought.
+# Do not output Action.
+# Do not output Action Input.
+#
+# """
+# )
+
+knowledge_agent = ReActAgent(
+    name="knowledge_agent",
+
+    description="""
+    Retrieves sleep science knowledge from the knowledge base.
+    """,
+
+    tools=[
+        retrieval_tool
+    ],
+
+    llm=llm,
+
+    system_prompt="""
+You are a retrieval-only agent.
+
+RULES:
+
+You MUST call retrieval_tool before answering.
+
+You are NOT allowed to answer from your own knowledge.
+
+You are NOT allowed to infer normal ranges.
+
+You are NOT allowed to interpret metrics.
+
+Workflow:
+
+1. Call retrieval_tool.
+2. Read retrieved content.
+3. Return retrieved content.
+
+If you have not called  yet:
+DO NOT answer.
+
+Output format:
+
+EVIDENCE:
+...
 """
 )
 
@@ -204,7 +335,8 @@ coordinator_agent = ReActAgent(
         "data_quality_agent",
         "sleep_stage_agent",
         "sleep_metrics_agent",
-        "interpretation_agent"
+        "interpretation_agent",
+        "knowledge_agent",
     ],
 
     system_prompt="""
@@ -252,8 +384,10 @@ Available agents:
 
 4. interpretation_agent
    - load sleep quality or sleep metrics using load_metrics_tool.
-   - Query sleep_knowledge_base at least once by using retrieval_tool.
    - Use retrieved evidence in your report.
+
+5. knowledge_agent
+   - retrieves scientific evidence from sleep_knowledge_base
 
 Always hand off to the most appropriate agent.
 Do not perform analysis yourself.
@@ -279,12 +413,27 @@ User: Evaluate sensor quality
 """
 )
 
+
 # Create the workflow
-workflow = AgentWorkflow(
-    agents=[coordinator_agent, data_quality_agent, sleep_stage_agent, sleep_metrics_agent, interpretation_agent],
-    root_agent="coordinator_agent",
-    verbose=True,
-)
+# workflow = AgentWorkflow(
+#     agents=[coordinator_agent, data_quality_agent, sleep_stage_agent, sleep_metrics_agent, interpretation_agent, knowledge_agent],
+#     root_agent="coordinator_agent",
+#     verbose=True,
+# )
+
+def create_workflow():
+    return AgentWorkflow(
+        agents=[
+            coordinator_agent,
+            data_quality_agent,
+            sleep_stage_agent,
+            sleep_metrics_agent,
+            interpretation_agent,
+            knowledge_agent
+        ],
+        root_agent="coordinator_agent",
+        verbose=True,
+    )
 
 # Run the system
 # async def run_multi_agent(query):

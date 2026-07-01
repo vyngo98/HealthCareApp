@@ -1,6 +1,7 @@
 from sleep_core.ppg import *
 import json
-from cache import analysis_cache
+# from cache import analysis_cache
+
 
 
 def load_study(subject_id: str):
@@ -141,20 +142,22 @@ def compute_sleep_metrics(subject_id: str):
     with open(hypnogram_file.replace('hypnogram.parquet', 'metrics.json'), "w") as file:
         json.dump(metrics, file)
 
-    if subject_id not in analysis_cache:
-        analysis_cache[subject_id] = {}
+    # if subject_id not in analysis_cache:
+    #     analysis_cache[subject_id] = {}
+    #
+    # analysis_cache[subject_id]["metrics"] = metrics
+    # analysis_cache[subject_id]["hypnogram_file"] = hypnogram_file
 
-    analysis_cache[subject_id]["metrics"] = metrics
-    analysis_cache[subject_id]["hypnogram_file"] = hypnogram_file
-
-    return metrics
+    return  {
+                "metrics_path":
+                    hypnogram_file.replace('hypnogram.parquet', 'metrics.json'),}
 
 # print(compute_sleep_metrics('2026-05-20-BaoLuu-4mm-10mA'))
 
 def load_metrics(subject_id: str):
     metrics_path = os.path.join(TEMP_FOLDER, f"{subject_id}_metrics.json")
     if not os.path.exists(metrics_path):
-        return "Study isn't processed to have metrics_path yet, we need to run sleep_metrics_agent first."
+        return "Study isn't processed to have file metrics.json yet, we need to handoff sleep_metrics_agent first."
     with open(metrics_path) as f:
         metrics = json.load(f)
     print(metrics)
@@ -233,8 +236,12 @@ def get_data_quality(subject_id: str) -> str:
                "accelerometer_data_availability_percent": acc_percent,
                "ppg_data_availability_percent": ppg_percent,
                "device_worn_ppg_percent": good_ppg_percent}
-    if subject_id not in analysis_cache:
-        analysis_cache[subject_id] = {}
+    # if subject_id not in analysis_cache:
+    #     analysis_cache[subject_id] = {}
+    #
+    # analysis_cache[subject_id]["signal_quality"] = summary
 
-    analysis_cache[subject_id]["signal_quality"] = summary
+    with open(os.path.join(TEMP_FOLDER, f"{subject_id}_data_quality.json"), "w", encoding="utf-8") as file:
+        json.dump(summary, file)
+
     return json.dumps(summary, indent=2)

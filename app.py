@@ -1,6 +1,9 @@
 import streamlit as st
 import asyncio
-from main import workflow
+
+from tensorflow.python.autograph.lang.directives import set_element_type
+
+from main import create_workflow
 import pandas as pd
 import plotly.graph_objects as go
 import glob
@@ -11,11 +14,17 @@ import numpy as np
 from llama_index.core.agent.workflow import (
     AgentOutput,
     ToolCall,
-    ToolCallResult
+    ToolCallResult,
+    AgentInput
 )
-from cache import analysis_cache
+# from cache import analysis_cache
 from sleep_core.define import TEMP_FOLDER
+from langfuse_client import langfuse
 
+from openinference.instrumentation.llama_index import LlamaIndexInstrumentor
+
+# Initialize LlamaIndex instrumentation
+LlamaIndexInstrumentor().instrument()
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -40,11 +49,10 @@ st.set_page_config(
 st.title("🛌 Sleep Analysis Multi-Agent Copilot")
 
 with st.sidebar:
-
     st.header("Studies")
 
-
-    studies = [os.path.basename(path) for path in glob.glob("/mnt/DataSet2/Projects/POC_Sleep_study/hsat_data/sleep_study/sleep_test/*")]
+    studies = [os.path.basename(path) for path in
+               glob.glob("/mnt/DataSet2/Projects/POC_Sleep_study/hsat_data/sleep_study/sleep_test/*")]
 
     selected_study = st.selectbox(
         "Select Study",
@@ -68,7 +76,6 @@ chat_col, trace_col = st.columns(
 )
 
 with chat_col:
-
     st.subheader("Sleep Copilot")
 
     chat_container = st.container(
@@ -85,7 +92,6 @@ with chat_col:
                 )
 
 with trace_col:
-
     st.subheader(
         "🤖 Agent Trace"
     )
@@ -95,9 +101,7 @@ with trace_col:
     )
 
     with trace_container:
-
         for log in st.session_state.agent_logs:
-
             st.markdown(log)
 
 st.divider()
@@ -117,7 +121,7 @@ tab1, tab2, tab3 = st.tabs(
 with tab1:
     result = st.session_state.analysis_result
     if os.path.exists(os.path.join(TEMP_FOLDER, f"{selected_study}_hypnogram.parquet")):
-    # if "hypnogram_file" in result:
+        # if "hypnogram_file" in result:
         hyp = pd.read_parquet(
             os.path.join(TEMP_FOLDER, f"{selected_study}_hypnogram.parquet")
         )["sleep_stage"]
@@ -154,9 +158,8 @@ with tab1:
         )
 
 with tab2:
-    result = st.session_state.analysis_result
     if os.path.exists(os.path.join(TEMP_FOLDER, f"{selected_study}_metrics.json")):
-    # if "metrics" in result:
+        # if "metrics" in result:
         with open(os.path.join(TEMP_FOLDER, f"{selected_study}_metrics.json"), 'r') as file:
             metrics = json.load(file)
         # metrics = result["metrics"]
@@ -188,11 +191,9 @@ with tab2:
                 )
 
 with tab3:
-    result = st.session_state.analysis_result
-
-
-    if "signal_quality" in result:
-        sq = result["signal_quality"]
+    if os.path.exists(os.path.join(TEMP_FOLDER, f"{selected_study}_data_quality.json")):
+        with open(os.path.join(TEMP_FOLDER, f"{selected_study}_data_quality.json"), 'r') as file:
+            sq = json.load(file)
 
         sq_config = [
             ("Total ACC Duration", "total_duration_acc", "seconds"),
@@ -219,21 +220,20 @@ with tab3:
                     f"{value}{unit}"
                 )
 
-
-
 user_prompt = st.chat_input(
     "Ask anything about this sleep study..."
 )
 
 query = f"""
         Current Study:
-        
+
         {selected_study}
-        
+
         User Question:
-        
+
         {user_prompt}
         """
+
 
 # async def run_query(query):
 #
@@ -272,8 +272,9 @@ query = f"""
 #
 #     return response, logs
 
-async def run_query(query):
 
+async def run_query(query):
+    workflow = create_workflow()
     handler = workflow.run(query)
 
     trace = []
@@ -282,9 +283,16 @@ async def run_query(query):
 
         event_name = event.__class__.__name__
 
-        if event_name == "AgentSetup":
+        if isinstance(event, AgentInput):
+            print("\n" + "=" * 80)
+            print("AGENT INPUT")
+            print("=" * 80)
+
+            agent_name = getattr(event, "current_agent_name", None)
+
+            print(event.__dict__)
             trace.append(
-                f"🤖 Agent: {event.current_agent_name}"
+                f"🤖 Agent: {agent_name}"
             )
 
         elif event_name == "ToolCall":
@@ -292,17 +300,40 @@ async def run_query(query):
                 f"🔧 Tool: {event.tool_name}"
             )
 
-        elif event_name == "ToolCallResult":
+        # elif event_name == "ToolCallResult":
+        #     trace.append(
+        #         f"✅ Finished: {event.tool_name}"
+        #     )
+
+        elif isinstance(event, ToolCallResult):
             trace.append(
                 f"✅ Finished: {event.tool_name}"
             )
+
+            print("\n" + "=" * 80)
+            print("TOOL RESULT")
+            print("=" * 80)
+
+            print(event.tool_name)
+
+            for block in event.tool_output.blocks:
+                print(block)
+
+        elif isinstance(event, AgentOutput):
+            print("\n" + "=" * 80)
+            print("AGENT OUTPUT")
+            print("=" * 80)
+
+            for block in event.response.blocks:
+                print(type(block))
+                print(block)
 
     response = await handler
 
     return response, trace
 
-if user_prompt:
 
+if user_prompt:
     st.session_state.messages.append(
         {
             "role": "user",
@@ -310,23 +341,27 @@ if user_prompt:
         }
     )
 
+    # loop = asyncio.get_event_loop()
+
     response, logs = asyncio.run(
         run_query(query)
     )
+
+    # response, logs = loop.run_until_complete(run_query(query))
 
     st.session_state.analysis_result = response
     st.session_state.agent_logs = logs
     print("\n" + "=" * 80)
     print("Selected study: ", selected_study)
-    if selected_study in analysis_cache:
-        print("\n" + "=" * 80)
-        print(analysis_cache[selected_study])
-        st.session_state.analysis_result = analysis_cache[selected_study]
-    else:
-        print("\n" + "=" * 80)
-        print("There is no selected study.")
-        print("analysis_cache: ", analysis_cache)
-        st.session_state.analysis_result = {}
+    # if selected_study in analysis_cache:
+    #     print("\n" + "=" * 80)
+    #     print(analysis_cache[selected_study])
+    #     st.session_state.analysis_result = analysis_cache[selected_study]
+    # else:
+    #     print("\n" + "=" * 80)
+    #     print("There is no selected study.")
+    #     print("analysis_cache: ", analysis_cache)
+    #     st.session_state.analysis_result = {}
 
     st.session_state.messages.append(
         {
