@@ -17,6 +17,8 @@ from llama_index.core.agent.workflow import (
     ToolCallResult,
     AgentInput
 )
+
+from memory.vector_memory import memory
 # from cache import analysis_cache
 from sleep_core.define import TEMP_FOLDER
 from langfuse_client import langfuse
@@ -275,7 +277,7 @@ query = f"""
 
 async def run_query(query):
     workflow = create_workflow()
-    handler = workflow.run(query)
+    handler = workflow.run(query, memory=memory)
 
     trace = []
 
@@ -329,6 +331,8 @@ async def run_query(query):
                 print(block)
 
     response = await handler
+
+    # await memory.aput(response)
 
     return response, trace
 

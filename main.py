@@ -10,8 +10,13 @@ from llama_index.embeddings.ollama import OllamaEmbedding
 from llama_index.core import VectorStoreIndex
 # import asyncio
 from tools import *
+import glob
+import os
+import fitz
 from qdrant_client import QdrantClient
 from qdrant_client.http.models import Distance, VectorParams, PointStruct
+from docling.document_converter import DocumentConverter
+from memory.vector_memory import memory
 
 # qdrant_client = QdrantClient(url="http://localhost:6333")
 
@@ -27,6 +32,9 @@ compute_sleep_metrics_tool = FunctionTool.from_defaults(compute_sleep_metrics)
 load_metrics_tool = FunctionTool.from_defaults(
     load_metrics
 )
+
+KNOWLEDGE_FOLDER = "E:\Workspace\Project\Healthcare-Agent\documents"
+
 
 db = chromadb.PersistentClient(path="./knowledge_chroma_db")
 chroma_collection = db.get_collection("knowledge")
@@ -422,7 +430,7 @@ User: Evaluate sensor quality
 # )
 
 def create_workflow():
-    return AgentWorkflow(
+    workflow = AgentWorkflow(
         agents=[
             coordinator_agent,
             data_quality_agent,
@@ -435,10 +443,13 @@ def create_workflow():
         verbose=True,
     )
 
+    return workflow
+
 # Run the system
 # async def run_multi_agent(query):
-#     response = await workflow.run(query)
+#     response = await workflow.run(query, memory=memory)
 #     print("Healthcare Agent Response:")
 #     print(response)
 #
+# import asyncio
 # asyncio.run(run_multi_agent("Interpret the sleep quality of study 2026-05-20-BaoLuu-4mm-10mA"))
